@@ -1,10 +1,12 @@
 %% Assignment 4 
 
 clear 
+clear all
 clc 
 cd 'C:\Users\it315\Documents\phd_computational_macro\ps4';
-addpath('../ReplicationFiles/Aiyagari1994/Matlab')
-addpath('../ReplicationFiles/Aiyagari1994/Matlab/Functions')
+addpath('./Functions')
+%addpath('../ReplicationFiles/Aiyagari1994/Matlab')
+%addpath('../ReplicationFiles/Aiyagari1994/Matlab/Functions')
 
 %% Ex. 4.a %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -76,8 +78,8 @@ for t = 2:T+1
     SolnPath.aggK(t) = aggK_end;
     SolnPath.aggL(t) = aggL_end;
 end
-SolnPath.aggK(1) = aggK_start; % End SRCE capital allocation
-SolnPath.aggL(1) = aggL_start; % End SRCE labour supply allocaiton
+SolnPath.aggK(1) = aggK_start; % start SRCE capital allocation
+SolnPath.aggL(1) = aggL_start; % start SRCE labour supply allocaiton
 
 % set terminal SRCE equilibrium objects 
 SolnPath.mVF(:, :, T+1) = mVF_end; % new SRCE (post TFP shock)
@@ -94,7 +96,6 @@ SolnPath.Kmcc(T+1) = SolnPath.aggK(T+1);
 
 
 % solve optimal HH problem using backward iteration %----------------------
-% placeholder variables 
 figure('Name', 'K Path (TCE)')
 title('K Path (TCE)')
 xlabel('Time')
@@ -158,10 +159,4 @@ while err > errTol
         drawnow;
     end
     iter = iter + 1;
-end
-
-
-
-for t = T:(-1):1
-    fprintf('%d\n', t)
 end
