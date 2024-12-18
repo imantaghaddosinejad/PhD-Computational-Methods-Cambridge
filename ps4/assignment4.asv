@@ -1,0 +1,167 @@
+%% Assignment 4 
+
+clear 
+clc 
+cd 'C:\Users\it315\Documents\phd_computational_macro\ps4';
+addpath('../ReplicationFiles/Aiyagari1994/Matlab')
+addpath('../ReplicationFiles/Aiyagari1994/Matlab/Functions')
+
+%% Ex. 4.a %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% set parameters 
+params.alpha = 0.36;
+params.beta = 0.96;
+params.delta = 0.08;
+params.tfp = 1.0; % initial TFP 
+params.mu = 0;
+params.rho = 0.9;
+params.sigma = 0.2 * sqrt(1 - params.rho^2);
+params.Nz = 7;
+params.minwealth = 0;
+params.initk = 6;
+params.progreport = true;
+
+% solve SRCE for t=0 (TFP = 1.0) 
+[mPolc_start, mPolaprime_start, mVF_start, mCurrDist_start, ...
+    aggK_start, aggL_start, w_start, r_start, ...
+    vGrida1, vGrida2, vGridz, mPz, vPiz] = fnSolveSRCE(params);
+
+%% Ex 4.b %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+params.tfp = 1.1; % update TFP (10% increase) 
+% solve SRCE for t=T+1 (TFP = 1.1)
+[mPolc_end, mPolaprime_end, mVF_end, mCurrDist_end, ...
+    aggK_end, aggL_end, w_end, r_end, ...
+    ~, ~, ~, ~, ~] = fnSolveSRCE(params);
+
+% plot marginal distributions across different technologies (TFPs)
+vMarginalDista_start = sum(mCurrDist_start, 2);
+vMarginalDista_end = sum(mCurrDist_end, 2);
+
+plot(vGrida2, vMarginalDista_start, 'LineWidth', 1.8)
+hold on;
+plot(vGrida2, vMarginalDista_end, 'LineWidth', 1.8)
+hold off;
+xlabel('Assets')
+ylabel('Density')
+title('Marginal Distribution of Assets')
+grid on;
+legend('TFP = 1.0', 'TFP = 1.1')
+
+%% Ex. 4.c, 4.d SOLVING FOR A TRANSITION COMPETITIVE EQUILIBRIUM (TCE) %%%%
+
+% set parameters 
+params.tfp = 1.0; % TFP shock occurs at T+1 only
+params.Na1 = 50;
+params.Na2 = 100;
+params.mPz = mPz;
+params.vGrida1 = vGrida1;
+params.vGrida2 = vGrida2;
+params.vGridz = vGridz;
+params.wtOld = 0.9900;
+
+% initialise path for optimal solution (VF, PF and eqlb. prices)
+T = 301; % add one extra period to let t=1 be initial SRCE state (i.e. t=0)
+SolnPath.aggK = zeros(T+1, 1); % initial K
+SolnPath.Kmcc = SolnPath.aggK; % endog. K computed from market clearing conditions
+%SolnPath.aggKnew = SolnPath.aggK; % updated path of capital
+SolnPath.aggL = zeros(T+1, 1);
+SolnPath.mPolaprime = zeros(params.Na2, params.Nz, T+1);
+SolnPath.mPolc = zeros(params.Na1, params.Nz, T+1);
+SolnPath.mVF = zeros(params.Na1, params.Nz, T+1);
+SolnPath.mCurrDist = zeros(params.Na2, params.Nz, T+1);
+
+% guessed path for aggregate allocation(s) 
+for t = 2:T+1
+    SolnPath.aggK(t) = aggK_end;
+    SolnPath.aggL(t) = aggL_end;
+end
+SolnPath.aggK(1) = aggK_start; % End SRCE capital allocation
+SolnPath.aggL(1) = aggL_start; % End SRCE labour supply allocaiton
+
+% set terminal SRCE equilibrium objects 
+SolnPath.mVF(:, :, T+1) = mVF_end; % new SRCE (post TFP shock)
+SolnPath.mPolaprime(:, :, T+1) = mPolaprime_end; % new savings policy rule (post TFP shock)
+SolnPath.mPolc(:, :, T+1) = mPolc_end; % new consumption policy rule (post TFP shock)
+SolnPath.mCurrDist(:, :, T+1) = mCurrDist_end; % new SRCE distribution over (a,z) (post TFP shock)
+
+% initialise joint-distribution (initial SRCE, at t=0) 
+SolnPath.mCurrDist(:, :, 1) = mCurrDist_start; % initial SRCE distribution over (a,z) (before TFP shock)
+
+% set the start and end of the endog. K path to match SRCE 
+SolnPath.Kmcc(1) = SolnPath.aggK(1);
+SolnPath.Kmcc(T+1) = SolnPath.aggK(T+1);
+
+
+% solve optimal HH problem using backward iteration %----------------------
+% placeholder variables 
+figure('Name', 'K Path (TCE)')
+title('K Path (TCE)')
+xlabel('Time')
+ylabel('K')
+grid on;
+
+err = 10; 
+errTol = 1e-6;
+iter = 1;
+Maxiter = 3000;
+while err > errTol 
+    mVF_t = zeros(params.Na1, params.Nz);
+    mPolaprime_t = zeros(params.Na2, params.Nz);
+    mPolc_t = zeros(params.Na1, params.Nz);
+    
+    opts_fnVFIBackwardSoln = struct();
+    for t = T:(-1):1 
+    
+        % solve optimal HH decision for current period 
+        opts_fnVFIBackwardSoln.VF = SolnPath.mVF(:, :, t+1); % next period VF (V_{t+1})
+        opts_fnVFIBackwardSoln.aggK = SolnPath.aggK(t); % current capital allocation K(t)
+        opts_fnVFIBackwardSoln.aggL = SolnPath.aggL(t); % current labour supply L(t)
+        [mVF_t, mPolaprime_t, mPolc_t] = fnVFIBackwardSoln(params, opts_fnVFIBackwardSoln);
+        
+        % update optimal HH policy rules and value function for current period
+        SolnPath.mVF(:, :, t) = mVF_t;
+        SolnPath.mPolaprime(:, :, t) = mPolaprime_t;
+        SolnPath.mPolc(:, :, t) = mPolc_t;
+    end
+    
+    % update distribution path 
+    opts_fnEvolDist = struct();
+    for t = 1:T-1
+        opts_fnEvolDist.mCurrDist = SolnPath.mCurrDist(:, :, t);
+        opts_fnEvolDist.mPolaprime = SolnPath.mPolaprime(:, :, t);
+        SolnPath.mCurrDist(:, :, t+1) = fnEvolDist(params, opts_fnEvolDist); % update next period dist.
+    end
+    
+    % update aggregate price path 
+    for t = 2:T
+        vMarginalDista = sum(SolnPath.mCurrDist(:, :, t), 2);
+        SolnPath.Kmcc(t) = vMarginalDista' * params.vGrida2'; % vGrida2 is 1xpNa2 (row) vector
+    end
+    
+    % compute error on price path 
+    err = max(abs(SolnPath.Kmcc - SolnPath.aggK));
+
+    % update price path
+    SolnPath.aggK = params.wtOld.*SolnPath.aggK + (1-params.wtOld).*SolnPath.Kmcc;
+    
+    if mod(iter, 10) == 0
+        fprintf('Iteration: %d. Error %.9f\n', iter, err);
+        fprintf('----------------------------------------------------\n')
+
+        plot(SolnPath.aggK(2:T), 'LineStyle', '--', 'LineWidth', 1, 'Color', 'r')
+        hold on;
+        plot(SolnPath.Kmcc(2:T), 'LineStyle', '-', 'LineWidth', 1, 'Color', 'b')
+        hold off;
+        grid on;
+        legend('Predicted', 'Actual')
+        drawnow;
+    end
+    iter = iter + 1;
+end
+
+
+
+for t = T:(-1):1
+    fprintf('%d\n', t)
+end
