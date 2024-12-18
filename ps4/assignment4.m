@@ -53,7 +53,7 @@ legend('TFP = 1.0', 'TFP = 1.1')
 %% Ex. 4.c, 4.d SOLVING FOR A TRANSITION COMPETITIVE EQUILIBRIUM (TCE) %%%%
 
 % set parameters 
-params.tfp = 1.0; % TFP shock occurs at T+1 only
+params.tfp = 1.1; % TFP shock at T+1 (10% increase) internalised by agents w/ perfect foresight
 params.Na1 = 50;
 params.Na2 = 100;
 params.mPz = mPz;
@@ -106,7 +106,7 @@ err = 10;
 errTol = 1e-6;
 iter = 1;
 Maxiter = 3000;
-while err > errTol 
+while err > errTol && iter <= Maxiter
     mVF_t = zeros(params.Na1, params.Nz);
     mPolaprime_t = zeros(params.Na2, params.Nz);
     mPolc_t = zeros(params.Na1, params.Nz);
@@ -146,16 +146,18 @@ while err > errTol
     % update price path
     SolnPath.aggK = params.wtOld.*SolnPath.aggK + (1-params.wtOld).*SolnPath.Kmcc;
     
-    if mod(iter, 10) == 0
+    if mod(iter, 20) == 0
         fprintf('Iteration: %d. Error %.9f\n', iter, err);
         fprintf('----------------------------------------------------\n')
 
-        plot(2:T, SolnPath.aggK(2:T), 'LineStyle', '--', 'LineWidth', 1, 'Color', 'r')
+        plot(0:T-1, SolnPath.Kmcc(1:T), 'LineStyle', '-', 'LineWidth', 1.2, 'Color', 'b')
         hold on;
-        plot(2:T, SolnPath.Kmcc(2:T), 'LineStyle', '-', 'LineWidth', 1, 'Color', 'b')
+        plot(0:T-1, SolnPath.aggK(1:T), 'LineStyle', '--', 'LineWidth', 1.2, 'Color', 'r')
         hold off;
         grid on;
-        legend('Predicted', 'Actual')
+        xlim([0 T-1])
+        yline(SolnPath.aggK(T+1),'Color', 'k', 'LineWidth', 0.7, 'LineStyle', '-')
+        legend('Predicted', 'Actual', 'New SS K', 'Location', 'southeast')
         drawnow;
     end
     iter = iter + 1;
