@@ -60,10 +60,40 @@ params.mPz = mPz;
 params.vGrida1 = vGrida1;
 params.vGrida2 = vGrida2;
 params.vGridz = vGridz;
-params.wtOld = 0.9900;
+params.wtOld = 0.9000;
+
+T = 301; % set transition time limit 
+
+% set key transition objects to begin loop
+opts_fnTCE = struct();
+opts_fnTCE.T = T; % total number of periods on transition path (set t=1 to initial SRCE). T+1 is terminal SRCE (post shock)
+opts_fnTCE.aggL_guess = zeros(T+1, 1);
+opts_fnTCE.aggL_guess(1:end) = aggL_end; % exg. labour supply 
+opts_fnTCE.mDist_start = mCurrDist_start; % initial (t=1) SRCE distribution over (a,z) 
+opts_fnTCE.mDist_end = mCurrDist_end; % terminal (t=T+1) SRCE distribution over (a,z)
+opts_fnTCE.mVF_start = mVF_start; % initial (t=1) SRCE VF 
+opts_fnTCE.mVF_end = mVF_end; % terminal (t=T+1) SRCE VF
+opts_fnTCE.progreport = true; % report progress and plot K path
+
+% set K path - initial guess
+opts_fnTCE.aggK_guess = zeros(T+1, 1);
+opts_fnTCE.aggK_guess(1) = aggK_start;
+opts_fnTCE.aggK_guess(2:end) = aggK_end;
+
+% set TFP path - permanent increase in TFP by 10% 
+opts_fnTCE.tfp_path = ones(T+1, 1);
+opts_fnTCE. tfp_path(2:T+1) = 1.1;
+
+% compute TCE for permanent shock
+SolnPath1 = fnTCE(params, opts_fnTCE);
+
+%% Ex. 4.f SOLVING FOR TRANSITIONAL DYNAMICS UNDER PARTIAL EQUILIBRIUM %%%%
+
+% set parameters 
+params.tfp = 1.1; % TFP shock at T+1 (10% increase) internalised by agents w/ perfect foresight
 
 % initialise path for optimal solution (VF, PF and eqlb. prices)
-T = 301; % add one extra period to let t=1 be initial SRCE state (i.e. t=0)
+T = 2001; % add one extra period to let t=1 be initial SRCE state (i.e. t=0)
 SolnPath.aggK = zeros(T+1, 1); % initial K
 SolnPath.Kmcc = SolnPath.aggK; % endog. K computed from market clearing conditions
 %SolnPath.aggKnew = SolnPath.aggK; % updated path of capital
@@ -94,10 +124,9 @@ SolnPath.mCurrDist(:, :, 1) = mCurrDist_start; % initial SRCE distribution over 
 SolnPath.Kmcc(1) = SolnPath.aggK(1);
 SolnPath.Kmcc(T+1) = SolnPath.aggK(T+1);
 
-
-% solve optimal HH problem using backward iteration %----------------------
-figure('Name', 'K Path (TCE)')
-title('K Path (TCE)')
+% solve optimal HH problem using backward iteration
+figure('Name', 'K Path (Transitional Partial Equilibrium)')
+title('K Path (Transitional Partial Equilibrium)')
 xlabel('Time')
 ylabel('K')
 grid on;
@@ -106,7 +135,8 @@ err = 10;
 errTol = 1e-6;
 iter = 1;
 Maxiter = 3000;
-while err > errTol && iter <= Maxiter
+%while err > errTol && iter <= Maxiter
+while iter < 2
     mVF_t = zeros(params.Na1, params.Nz);
     mPolaprime_t = zeros(params.Na2, params.Nz);
     mPolc_t = zeros(params.Na1, params.Nz);
@@ -144,21 +174,96 @@ while err > errTol && iter <= Maxiter
     err = max(abs(SolnPath.Kmcc - SolnPath.aggK)); % the first and last (T+1) entry in Kmcc and aggK vectors are equal 
 
     % update price path
-    SolnPath.aggK = params.wtOld.*SolnPath.aggK + (1-params.wtOld).*SolnPath.Kmcc;
+    %SolnPath.aggK = params.wtOld.*SolnPath.aggK + (1-params.wtOld).*SolnPath.Kmcc;
     
-    if mod(iter, 20) == 0
+    if mod(iter, 1) == 0
         fprintf('Iteration: %d. Error %.9f\n', iter, err);
         fprintf('----------------------------------------------------\n')
 
-        plot(0:T-1, SolnPath.Kmcc(1:T), 'LineStyle', '-', 'LineWidth', 1.2, 'Color', 'b')
-        hold on;
-        plot(0:T-1, SolnPath.aggK(1:T), 'LineStyle', '--', 'LineWidth', 1.2, 'Color', 'r')
-        hold off;
+        plot(0:T, SolnPath.Kmcc(1:T+1), 'LineStyle', '-', 'LineWidth', 1.2, 'Color', 'b')
         grid on;
-        xlim([0 T-1])
+        xlim([0 T])
         yline(SolnPath.aggK(T+1),'Color', 'k', 'LineWidth', 0.7, 'LineStyle', '-')
-        legend('Predicted', 'Actual', 'New SS K', 'Location', 'southeast')
+        ylabel('K')
+        xlabel('Time')
+        title('K Path to a 10% Increase in TFP (Partial Equilibrium)')
+        legend('Actual', 'Predicted', 'New SS K', 'Location', 'southeast')
         drawnow;
     end
     iter = iter + 1;
 end
+
+%% Ex. 4.h TRANSITIONAL DYNAMICS FOR A TEMPORARY TFP SHOCK %%%%%%%%%%%%%%%%
+
+% set key transition objects to begin loop
+T = 201;
+
+% set TCE loop objects
+opts_fnTCE = struct();
+opts_fnTCE.T = T; 
+opts_fnTCE.aggK_guess = aggK_start;
+opts_fnTCE.aggL_guess = zeros(T+1, 1);
+opts_fnTCE.aggL_guess(1:end) = aggL_end; % exg. labour supply 
+opts_fnTCE.mDist_start = mCurrDist_start;
+opts_fnTCE.mDist_end = mCurrDist_start;
+opts_fnTCE.mVF_start = mVF_start;
+opts_fnTCE.mVF_end = mVF_start;
+opts_fnTCE.progreport = true;
+
+% set K path - initial guess
+opts_fnTCE.aggK_guess = zeros(T+1, 1);
+opts_fnTCE.aggK_guess(1:end) = aggK_start;
+
+% set TFP path
+opts_fnTCE.tfp_path = zeros(T+1, 1);
+opts_fnTCE.tfp_path(1) = 1.0;
+opts_fnTCE.tfp_path(2) = 0.95; % temporary (MIT) shock
+opts_fnTCE.tfp_path(3:end) = 1.0;
+
+% compute TCE for temporary shock
+SolnPath2 = fnTCE(params, opts_fnTCE);
+
+%% Ex 4.i TEMPORARY TFP SHOCK W/ DECAY %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+T = 301; % set time horizon for Transition path
+
+% set TCE loop objects 
+opts_fnTCE = struct();
+opts_fnTCE.T = T; 
+opts_fnTCE.aggL_guess = zeros(T+1, 1);
+opts_fnTCE.aggL_guess(1:end) = aggL_end; 
+opts_fnTCE.mDist_start = mCurrDist_start;
+opts_fnTCE.mDist_end = mCurrDist_start;
+opts_fnTCE.mVF_start = mVF_start;
+opts_fnTCE.mVF_end = mVF_start;
+opts_fnTCE.progreport = true;
+
+% set K path - initial guess
+opts_fnTCE.aggK_guess = zeros(T+1, 1);
+opts_fnTCE.aggK_guess(1:end) = aggK_start;
+
+% set TFP Path 
+params.rho_tfp = 0.90;
+opts_fnTCE.tfp_path = zeros(T+1, 1);
+opts_fnTCE.tfp_path(1) = 1.0; % initial SRCE TFP (t=1) 
+opts_fnTCE.tfp_path(2) = 0.95; % 5% decrease in TFP 
+for t = 3:T+1
+    opts_fnTCE.tfp_path(t) = opts_fnTCE.tfp_path(t-1)^params.rho_tfp;
+end
+
+% compute TCE for temporary shock
+SolnPath3 = fnTCE(params, opts_fnTCE);
+
+%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+SolnPath1.aggKdiff = SolnPath1.aggK - SolnPath1.aggK(T+1);
+
+figure;
+plot(SolnPath1.aggKdiff, 'LineWidth', 1)
+grid on;
+yline(0, 'LineStyle', '--', 'Color', 'k')
+xlim([2 90])
+ylim([-1 0.2])
+xticks(0:10:120)
