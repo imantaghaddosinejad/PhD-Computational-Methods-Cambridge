@@ -25,7 +25,6 @@ ss.r = 1/pBeta - 1;
 
 pEta = (ss.A * (1-pAlpha) * ((ss.r+pDelta)/(pAlpha*ss.A))^((pAlpha-pRiskAversion)/(pAlpha-1)) * ((ss.r+pDelta)/pAlpha - pDelta)^(-pRiskAversion)) /...
     ss.L^(1/pFrisch + pRiskAversion);
-
 ss.K = ((ss.r+pDelta) / (pAlpha*ss.A))^(1/(pAlpha-1)) * ss.L;
 ss.C = ((ss.r+pDelta)/pAlpha - pDelta) * ((ss.r+pDelta)/(pAlpha*ss.A))^(1/(pAlpha-1)) * ss.L;
 ss.Y = ss.A * ((ss.r+pDelta)/(pAlpha*ss.A))^(pAlpha/(pAlpha-1)) * ss.L;
@@ -73,8 +72,8 @@ vI = ss.I .* ones(T,1);
 wtOldK      = 0.9000;
 wtOldC      = 0.9000;
 wtOldLambda = 0.9000;
-errTol = 1e-8;
-MaxIter = 20000;
+errTol = 1e-7;
+MaxIter = 30000;
 
 % run loop (solve model) 
 iter = 1;
@@ -241,3 +240,127 @@ else
 end
 
 %% Post Convergence (Solution) Analysis
+
+saveas(gcf, './Figures/RTM_Soln_Path.png');
+
+RegAnalysis = struct(); % store results 
+vK_adj = vK(BurnT:end-BurnT); % only consider burn period 
+for iA = 1:params.pNA     
+    % create regression variables (lagged log K) 
+    log_vK = log(vK_adj(find(ivA(BurnT:end-BurnT) == iA)));
+    RegAnalysis.vK{iA} = log_vK(2:end);
+    RegAnalysis.vK_Past{iA} = log_vK(1:end-1);
+    % regression analysis conditioning on productivity 
+    RegAnalysis.y{iA} = RegAnalysis.vK{iA}; 
+    RegAnalysis.X{iA} = RegAnalysis.vK_Past{iA};
+    RegAnalysis.X{iA} = [ones(size(RegAnalysis.X{iA})), RegAnalysis.X{iA}];
+    [RegAnalysis.b{iA}, RegAnalysis.bint{iA}, RegAnalysis.r{iA}, RegAnalysis.rint{iA}, RegAnalysis.stats{iA}] = regress(RegAnalysis.y{iA}, RegAnalysis.X{iA});
+    RegAnalysis.MSE{iA} = mean(RegAnalysis.r{iA}.^2);
+    RegAnalysis.yhat{iA} = RegAnalysis.b{iA}(1) + RegAnalysis.b{iA}(2) .* RegAnalysis.X{iA}(:,2);
+end
+
+% figures 
+subplot(3,3,1); 
+scatter(RegAnalysis.vK_Past{1}, RegAnalysis.vK{1}, 6, 'blue','filled'); grid on;hold on; 
+plot(RegAnalysis.X{1}(:,2), RegAnalysis.yhat{1}, 'r--');hold off; 
+ylabel("Log(K')");xlabel('Log(K)');legend('A=1');
+subplot(3,3,2);
+scatter(RegAnalysis.vK_Past{2}, RegAnalysis.vK{2}, 6, 'blue','filled'); grid on;hold on; 
+plot(RegAnalysis.X{2}(:,2), RegAnalysis.yhat{2}, 'r--');hold off; 
+ylabel("Log(K')");xlabel('Log(K)');legend('A=2');
+subplot(3,3,3);
+scatter(RegAnalysis.vK_Past{3}, RegAnalysis.vK{3}, 6, 'blue','filled'); grid on;hold on; 
+plot(RegAnalysis.X{3}(:,2), RegAnalysis.yhat{3}, 'r--');hold off; 
+ylabel("Log(K')");xlabel('Log(K)');legend('A=3');
+subplot(3,3,4);
+scatter(RegAnalysis.vK_Past{4}, RegAnalysis.vK{4}, 6, 'blue','filled'); grid on;hold on; 
+plot(RegAnalysis.X{4}(:,2), RegAnalysis.yhat{4}, 'r--');hold off; 
+ylabel("Log(K')");xlabel('Log(K)');legend('A=4');
+subplot(3,3,5);
+scatter(RegAnalysis.vK_Past{5}, RegAnalysis.vK{5}, 6, 'blue','filled'); grid on;hold on; 
+plot(RegAnalysis.X{5}(:,2), RegAnalysis.yhat{5}, 'r--');hold off; 
+ylabel("Log(K')");xlabel('Log(K)');legend('A=5');
+subplot(3,3,6);
+scatter(RegAnalysis.vK_Past{6}, RegAnalysis.vK{6}, 6, 'blue','filled'); grid on;hold on; 
+plot(RegAnalysis.X{6}(:,2), RegAnalysis.yhat{6}, 'r--');hold off; 
+ylabel("Log(K')");xlabel('Log(K)');legend('A=6');
+subplot(3,3,7);
+scatter(RegAnalysis.vK_Past{7}, RegAnalysis.vK{7}, 6, 'blue','filled'); grid on;hold on; 
+plot(RegAnalysis.X{7}(:,2), RegAnalysis.yhat{7}, 'r--');hold off; 
+ylabel("Log(K')");xlabel('Log(K)');legend('A=7');
+saveas(gcf, './Figures/K_scatter_plots.png'); 
+
+% simulate K path -  actual nonlinear path vs log-linear prediction
+size(vK)
+vSimK = zeros(size(vK));
+vSimK(1) = vK(1);
+for t = 2:T 
+    vSimK(t) = exp(RegAnalysis.b{ivA(t)}(1) + RegAnalysis.b{ivA(t)}(2)*log(vSimK(t-1)));
+end
+vDevK = abs(vK - vSimK);
+maxDev = find(vDevK == max(vDevK));
+
+figure;
+plot(1:T, vK, 'b-', 'LineWidth',1); hold on; 
+plot(1:T, vSimK, 'r-.', 'LineWidth',1); grid on;
+yline(ss.K, 'k-');xlim([BurnT, T-BurnT]);ylabel('K');
+xline(maxDev, 'k--');hold off;
+legend('Actual', 'Log-lin Forecast', '','Max Deviation', 'Location', 'northeast');
+saveas(gcf, './Figures/LogLinForecast.png');
+
+% log variables 
+vLogK = log(vK);
+vLogI = log(vI);
+vLogC = log(vC);
+vLogL = log(vL);
+vLogY = log(vY);
+
+% relative variances 
+std_Y2Y = std(vLogY)/std(vLogY);
+std_K2Y = std(vLogK)/std(vLogY);
+std_L2Y = std(vLogL)/std(vLogY);
+std_I2Y = std(vLogI)/std(vLogY);
+std_C2Y = std(vLogC)/std(vLogY);
+
+% auto corr 
+[acf, lags] = xcorr(vLogY - mean(vLogY), 'coeff');
+acf = acf(lags>=0);
+lags = lags(lags>=0);
+autoCorr_Y = acf(2);
+
+[acf, lags] = xcorr(vLogI - mean(vLogI), 'coeff');
+acf = acf(lags>=0);
+lags = lags(lags>=0);
+autoCorr_I = acf(2);
+
+[acf, lags] = xcorr(vLogC - mean(vLogC), 'coeff');
+acf = acf(lags>=0);
+lags = lags(lags>=0);
+autoCorr_C = acf(2);
+
+[acf, lags] = xcorr(vLogL - mean(vLogL), 'coeff');
+acf = acf(lags>=0);
+lags = lags(lags>=0);
+autoCorr_L = acf(2);
+
+[acf, lags] = xcorr(vLogK - mean(vLogK), 'coeff');
+acf = acf(lags>=0);
+lags = lags(lags>=0);
+autoCorr_K = acf(2);
+
+% co-movements 
+corr_YC = corrcoef(vLogY, vLogC);
+corr_YK = corrcoef(vLogY, vLogK);
+corr_YI = corrcoef(vLogY, vLogI);
+corr_YL = corrcoef(vLogY, vLogL);
+
+% create table 
+varNames = {'Y', 'I', 'C', 'L', 'K'};
+rel_std = [std_Y2Y; std_I2Y; std_C2Y; std_L2Y; std_K2Y];
+autoCorr = [autoCorr_Y; autoCorr_I; autoCorr_C; autoCorr_L; autoCorr_K];
+corrCoef = [1.000; corr_YI(1,2); corr_YC(1,2); corr_YL(1,2); corr_YK(1,2)];
+T = table(rel_std, autoCorr, corrCoef,...
+    'RowNames', varNames,...
+    'VariableNames', {'RelSd_to_Y','AutoCorr','CorrCoeff_to_Y'});
+disp('Business cycle Statistics')
+disp(T)
