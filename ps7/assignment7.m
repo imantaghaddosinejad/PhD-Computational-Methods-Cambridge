@@ -54,7 +54,7 @@ mz = repmat(vGridz', p.pNa, 1); % matrix of productivity states over a-states %%
 
 % fixed point method requires guessed solution and iterative convergence 
 % guess (initial) solution - equilibrium objects  
-K = 1.1776; % agg capital 
+K = 8; %1.1776; % agg capital 
 L = ss.L; % agg labour supply 
 mLambda = zeros(p.pNa, p.pNz); % state contingent savings constraint (lower bound)
 mPolaprime = repmat(0.01 .* vGrida', 1, p.pNz); % given pFrisch = pSigma = 1 we only need to guess a'(a,z) (initial) solution
@@ -108,7 +108,7 @@ while err1 > errTolSRCE && iter <= MaxIter
         mPolaprimeprime = interp1(vGrida',mPolaprime(:,izprime),mPolaprime,'linear','extrap');
         
         % cost term 
-        mPsi = (pMu/2).*((mPolaprimeprime./mPolaprime).^2-1);
+        mPsi1 = (pMu/2).*((mPolaprimeprime./mPolaprime).^2-1);
 
         % compute future auxillary variable over all current states (ia,iz)
         mMprime = ((1+rprime).*mPolaprime - mPolaprimeprime - (pMu/2).*((mPolaprimeprime-mPolaprime)./mPolaprime).^2.*mPolaprime)./(wprime*zprime); 
@@ -124,14 +124,14 @@ while err1 > errTolSRCE && iter <= MaxIter
         % compute expectation term cumulatively
         mMUinv = 1./mPolcprime;
         mBelief = mBelief +...
-            pBeta .* repmat(mPz(:, izprime)', p.pNa, 1) .* (1+rprime+mPsi).*mMUinv; 
+            pBeta .* repmat(mPz(:, izprime)', p.pNa, 1) .* (1+rprime+mPsi1).*mMUinv; 
     end
     
     % ==================================================
     % SOLVE FOR OPTIMAL POLICY RULES GIVEN BELIEFS 
     % ==================================================
     
-    mRHS = (mBelief + mLambda)./(1+pMu.*(mPolaprime-ma)./ma);
+    mRHS = (mBelief+mLambda)./(1+pMu.*(mPolaprime-ma)./ma);
     c = 1./mRHS;
     c(c<=0) = 1e-10;
     mPoln = w.*mz./(pEta.*c);
@@ -140,21 +140,19 @@ while err1 > errTolSRCE && iter <= MaxIter
     % UPDATE N+1th ITERATION POLICY RULES AND CONSTRAINTS
     % ==================================================
     
-    mLambdanew = (1+pMu.*(mPolaprime-ma)./ma)./((1+r).*ma + w.*mz.*mPoln - ma.*(pMu/2).*((mPolaprime-ma)./ma).^2 - mPolaprime) - mBelief; %%% CHECK THIS UPDATING!! 
-    mPolaprimenew = (1+r).*ma + w.*mz.*mPoln - ma.*(pMu/2).*((mPolaprime-ma)./ma).^2 - mPolc;
+    mPsi2 = 1+pMu.*(mPolaprime-ma)./ma;
+    %mLambdanew = mPsi2./((1+r).*ma + w.*mz.*mPoln - (pMu/2).*ma.*((mPolaprime-ma)./ma).^2 - mPolaprime) - mBelief;
+    mLambdanew = mPsi2./mPolc - mBelief;
+    mPolaprimenew = (1+r).*ma + w.*mz.*mPoln - (pMu/2).*ma.*((mPolaprime-ma)./ma).^2 - c;
+    mPolc = c;
 
     % impose friction (lower bound on savings constraint)
-    mPolaprimenew(mPolaprimenew<=1) = 1; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% RELATE CONSTRAINTS TO 
-    mLambdanew(mPolaprimenew>1) = 0;
+    mPolaprimenew(mPolaprimenew<=p.paMin) = p.paMin;
+    mLambdanew(mPolaprimenew>p.paMin) = 0;
     
     % ==================================================
     % GIVEN POLICY RULES COMPUTE STATIONARY DISTRIBUTION
     % ==================================================
-
-    % interpolate policy rule on finer grid 
-    % for iz = 1:p.pNz
-    %     mPolaprimenew2(:, iz) = interp1(vGrida1, mPolaprimenew(:, iz), vGrida000000000000000000000000000000000000000000000000002, "linear", "extrap");
-    % end
 
     % non-stochastic iterative histogram method
     iter2 = 1;
@@ -162,7 +160,6 @@ while err1 > errTolSRCE && iter <= MaxIter
     while err2 > errTolDist
 
         mNewDist = zeros(size(mCurrDist));
-
         for iz = 1:p.pNz 
             for ia = 1:p.pNa
                 
@@ -193,10 +190,6 @@ while err1 > errTolSRCE && iter <= MaxIter
         % compute error and update distribution 
         err2 = max(max(abs(mNewDist-mCurrDist)));
         mCurrDist = mNewDist;
-        % if mod(iter2, 1)==0
-        %     fprintf('Iter %d. Distribution Error: %.10f\n', iter2, err2)
-        % end
-        % iter2=iter2+1;
     end
 
     % ==================================================
@@ -204,25 +197,28 @@ while err1 > errTolSRCE && iter <= MaxIter
     % ==================================================
     
     vMargDista = sum(mCurrDist,2);
-    Knew = vGrida * vMargDista;
-    Lnew = sum(repmat(vGridz', p.pNa, 1) .* mPoln .* mCurrDist, 'all');
-    
+    Knew = vGrida*vMargDista;
+    Lnew = sum(mz.*mPoln.*mCurrDist,'all');
+    avg_mLambda = sum(mLambda.*mCurrDist,'all');
+    avg_mLambdanew = sum(mLambdanew.*mCurrDist,'all');
+    avg_mPolaprime = sum(mPolaprime.*mCurrDist,'all');
+    avg_mPolaprimenew = sum(mPolaprimenew.*mCurrDist,'all');
+
     % ==================================================
     % UPDATING 
     % ==================================================
     
     % compute error
-    errK = abs(K-Knew);
-    errL = abs(L-Lnew);
-    meanLambda = sum(mLambda .* mCurrDist, 'all');
-    meanLambdaNew = sum(mLambdanew .* mCurrDist, 'all');
-    errPolaprime = max(max(abs(mPolaprime - mPolaprimenew)));
-    errLambda = max(max(abs(mLambda - mLambdanew)));
+    errK = abs(Knew-K);
+    errL = abs(Lnew-L);
+    avg_erraprime = sum(abs(mPolaprimenew-mPolaprime).*mCurrDist,'all');
+    avg_errlambda = sum(abs(mLambdanew-mLambda).*mCurrDist,'all');
     
     err1 = mean([...
         errK; ...
         errL; ...
-        abs(meanLambda - meanLambdaNew)]);
+        avg_errlambda; ...
+        avg_erraprime]);
 
     % convex updating (smooth)
     K = wtOldK*K + (1-wtOldK)*Knew;
@@ -231,10 +227,17 @@ while err1 > errTolSRCE && iter <= MaxIter
     mLambda = wtOldLambda.*mLambda + (1-wtOldLambda).*mLambdanew;
     
     timer = toc;
-    if mod(iter, 2) == 0
-        
+    if mod(iter, 10) == 0
         fprintf('Iteration %d in %.2fs. Error: %.10f\n', iter, timer, err1);
-        fprintf('errK: %.6f. errL: %.6f. errPolaprime: %.6f. errLambda: %.6f\n', errK, errL, errPolaprime, errLambda);
+        fprintf('errK: %.6f errL: %.6f erraprime: %.6f errlambda: %.6f\n', errK, errL, avg_erraprime, avg_errlambda);
+        fprintf('r: %.4f w: %.4f K: %.4f L: %.4f\n', r, w, K, L);
+        fprintf('min lambda value: %.4f\n', min(min(mLambda)));
+        fprintf('======================================================================\n');
+    end
+
+    if mod(iter, 100) == 0
+    plot(vGrida, sum(mCurrDist,2),'LineWidth',1); grid on;drawnow;
     end
     iter = iter+1;
 end
+plot(vGrida,mPoln)
