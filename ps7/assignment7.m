@@ -23,8 +23,7 @@ p.pNA = 7;
 p.pNz = 7;
 p.paMin = 1.000;
 p.paMax = 150.000;
-p.pNa1 = 100;
-p.pNa2 = 200;
+p.pNa = 100;
 p.pCurve = 5;
 
 % steady state 
@@ -34,46 +33,48 @@ ss.L = 1/3;
 % unpack parameters - easy of code notation (struct is used in functions)
 pBeta=p.pBeta;pAlpha=p.pAlpha;pDelta=p.pDelta;pMu=p.pMu;pFrisch=p.pFrisch;pRisk=p.pRiskAversion;pEta=p.pEta; 
 
-% discretize TFP shock process and idiosyncratic shock process 
+% discretize TFP shock process 
 [vGridA, mPA] = fnTauchen(p.pRhoA,p.pSigmaA,0.0,p.pNA);
 vGridA = exp(vGridA);
+
+% discretize idiosyncratic shock process 
 [vGridz, mPz] = fnTauchen(p.pRhoZ,p.pSigmaZ,0.0,p.pNz);
 vGridz = exp(vGridz);
 
 % set asset grid (asset-space) 
-x1 = linspace(0,0.5,p.pNa1);
-x2 = linspace(0,0.5,p.pNa2);
-y1 = x1.^p.pCurve / max(x1.^p.pCurve);
-y2 = x2.^p.pCurve / max(x2.^p.pCurve);
-vGrida1 = p.paMin + (p.paMax - p.paMin).*y1; 
-vGrida2 = p.paMin + (p.paMax - p.paMin).*y2;
-ma = repmat(vGrida1', 1, p.pNz); % matrix of asset states over z-states
-mz = repmat(vGridz', p.pNa1, 1); % matrix of productivity states over a-states %% CHECK THE DIMENSION HERE!!
+x = linspace(0,0.5,p.pNa);
+y = x.^p.pCurve / max(x.^p.pCurve);
+vGrida = p.paMin + (p.paMax - p.paMin).*y; 
+
+% auxillary matrices 
+ma = repmat(vGrida', 1, p.pNz); % matrix of asset states over z-states
+mz = repmat(vGridz', p.pNa, 1); % matrix of productivity states over a-states %% CHECK THE DIMENSION HERE!!
 
 %% solve for a SRCE using PFI Method %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % fixed point method requires guessed solution and iterative convergence 
-% guess (initial) solution 
+% guess (initial) solution - equilibrium objects  
 K = 1.1776; % agg capital 
 L = ss.L; % agg labour supply 
-mLambda = zeros(p.pNa1, p.pNz); % state contingent savings constraint (lower bound)
-mPolaprime = repmat(0.01 .* vGrida1', 1, p.pNz); % given pFrisch = pSigma = 1 we only need to guess a'(a,z) (initial) solution
+mLambda = zeros(p.pNa, p.pNz); % state contingent savings constraint (lower bound)
+mPolaprime = repmat(0.01 .* vGrida', 1, p.pNz); % given pFrisch = pSigma = 1 we only need to guess a'(a,z) (initial) solution
+mPoln = ones(p.pNa, p.pNz);
+mPolc = (1+pAlpha*ss.A*(K/L)^(pAlpha-1)-pDelta).*ma + ((1-pAlpha)*ss.A*(K/L)^pAlpha).*mz.*mPoln - mPolaprime - (pMu/2).*ma.*((mPolaprime-ma)./ma).^2;
 
 % loop parameters 
-wtOldK = 0.9900;
-wtOldL = 0.9900;
+wtOldK = 0.9000;
+wtOldL = 0.9000;
 wtOldmPolaprime = 0.9000;
 wtOldLambda = 0.9000;
 errTolSRCE = 1e-8;
-errTolDist = 1e-8;
+errTolDist = 1e-10;
 MaxIter = 10000;
 
 % initialise 
 Knew = 0;
 mLambdanew = zeros(size(mLambda));
 mPolaprimenew = zeros(size(mPolaprime));
-mPolaprimenew2 = zeros(p.pNa2, p.pNz);
-mCurrDist = ones(p.pNa1, p.pNz) ./ (p.pNa1*p.pNz);
+mCurrDist = ones(p.pNa,p.pNz)./(p.pNa*p.pNz);
 
 % PFI Loop solve for SRCE
 iter = 1;
@@ -86,7 +87,7 @@ while err1 > errTolSRCE && iter <= MaxIter
     % ==================================================
 
     r = pAlpha*ss.A*(K/L)^(pAlpha-1) - pDelta;
-    w = (1-pAlpha).*ss.A.*(K/L)^(-pAlpha);
+    w = (1-pAlpha).*ss.A.*(K/L)^(pAlpha);
     
     % ==================================================
     % SOLVE BACKWARDS FOR BELIEFS GIVEN Nth POLICY RULES
@@ -104,33 +105,36 @@ while err1 > errTolSRCE && iter <= MaxIter
         zprime = vGridz(izprime);
 
         % interpolate policy function to compute a'' = a''(ia',iz') over all current states (ia,iz)
-        mPolaprimeprime = interp1(vGrida1',mPolaprime(:,izprime),mPolaprime,'linear','extrap');
+        mPolaprimeprime = interp1(vGrida',mPolaprime(:,izprime),mPolaprime,'linear','extrap');
         
+        % cost term 
+        mPsi = (pMu/2).*((mPolaprimeprime./mPolaprime).^2-1);
+
         % compute future auxillary variable over all current states (ia,iz)
-        mMprime = ((1+rprime).*mPolaprime - (pMu/2).*((mPolaprimeprime-mPolaprime)./mPolaprime)./mPolaprime - mPolaprimeprime)./(wprime*zprime); %%%%%% CHECK EQ!!  
+        mMprime = ((1+rprime).*mPolaprime - mPolaprimeprime - (pMu/2).*((mPolaprimeprime-mPolaprime)./mPolaprime).^2.*mPolaprime)./(wprime*zprime); 
 
         % compute future optimal labour supply decision n' = n(ia'(ia,iz),iz') 
         mPolnprime = (-pEta.*mMprime + sqrt((pEta.*mMprime).^2 + 4*pEta))./(2*pEta); 
 
         % compute future optimal consumption decision c' = c(ia'(ia,iz),iz')
         mPolcprime = wprime*zprime./(pEta.*mPolnprime); %%%%%%%%%%%%%%%%%%%%%%%%% MAJOR - CHECK THIS EQ!!!!
-        mPolcprime(mPolcprime<=1e-10) = 1e-10; %%%%%%%%%%%%%%%%%%%%%%%%% CONSTRAINT AT ZERO?? 
+        mPolcprime(mPolcprime<=0) = 1e-10;
 
         % update beliefs 
         % compute expectation term cumulatively
         mMUinv = 1./mPolcprime;
         mBelief = mBelief +...
-            pBeta .* repmat(mPz(:, izprime)', p.pNa1, 1).*...
-            (1 + rprime - (pMu/2).*(mPolaprimeprime.^2 - mPolaprime.^2)./mPolaprime.^2).*mMUinv; %%%%%%%%%%%%%%% CHECK/SIMPLIFY THIS EQ AND SIGN!! 
+            pBeta .* repmat(mPz(:, izprime)', p.pNa, 1) .* (1+rprime+mPsi).*mMUinv; 
     end
     
     % ==================================================
     % SOLVE FOR OPTIMAL POLICY RULES GIVEN BELIEFS 
     % ==================================================
     
-    mPolc = (1 + pMu.*(mPolaprime-ma)./ma)./(mBelief + mLambda); %%%%%%%%%%%%% CHECK THIS EQUATION!!! 
-    mPolc(mPolc<=1e-10) = 1e-10;
-    mPoln = w.*mz./(pEta.*mPolc);
+    mRHS = (mBelief + mLambda)./(1+pMu.*(mPolaprime-ma)./ma);
+    c = 1./mRHS;
+    c(c<=0) = 1e-10;
+    mPoln = w.*mz./(pEta.*c);
     
     % ==================================================
     % UPDATE N+1th ITERATION POLICY RULES AND CONSTRAINTS
@@ -160,15 +164,15 @@ while err1 > errTolSRCE && iter <= MaxIter
         mNewDist = zeros(size(mCurrDist));
 
         for iz = 1:p.pNz 
-            for ia = 1:p.pNa1
+            for ia = 1:p.pNa
                 
                 % for state (ia,iz) interpolate optimal savings on asset grid
                 aprime = mPolaprimenew(ia,iz);
-                nLow = sum(vGrida1 <= aprime);
+                nLow = sum(vGrida <= aprime);
                 nLow(nLow<=1) = 1;
-                nLow(nLow>=length(vGrida1)) = length(vGrida1) - 1;
+                nLow(nLow>=length(vGrida)) = length(vGrida) - 1;
                 nHigh = nLow + 1;
-                wtLow = (vGrida1(nHigh)-aprime)/(vGrida1(nHigh)-vGrida1(nLow));
+                wtLow = (vGrida(nHigh)-aprime)/(vGrida(nHigh)-vGrida(nLow));
                 wtLow(wtLow>1) = 1;
                 wtLow(wtLow<0) = 0;
                 
@@ -200,8 +204,8 @@ while err1 > errTolSRCE && iter <= MaxIter
     % ==================================================
     
     vMargDista = sum(mCurrDist,2);
-    Knew = vGrida1 * vMargDista;
-    Lnew = sum(repmat(vGridz', p.pNa1, 1) .* mPoln .* mCurrDist, 'all');
+    Knew = vGrida * vMargDista;
+    Lnew = sum(repmat(vGridz', p.pNa, 1) .* mPoln .* mCurrDist, 'all');
     
     % ==================================================
     % UPDATING 
