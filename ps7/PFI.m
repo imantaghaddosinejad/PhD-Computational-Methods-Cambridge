@@ -4,33 +4,28 @@ clear variables;
 % addpath('./Figures')
 addpath('./Functions')
 
-%% Model Fundamentals 
+%% MODEL FUNDAMENTALS  
 % model parameters 
-p.Beta         = 0.99;
-p.Alpha        = 0.36;
-p.Delta        = 0.025;
-p.Theta        = 0.5;
-p.Frisch       = 1.0;
-p.Eta          = 7.6;
-p.RiskAversion = 1.0;
-p.Mu           = 0.0;
+p.Alpha     = 0.36;
+p.Beta      = 0.99;
+p.Delta     = 0.025;
+p.Theta     = 0.50;
+p.Frisch    = 1.00;
+p.Eta       = 7.60;
 
 % other parameters
-p.RhoA     = 0.95;
 p.Rhoz      = 0.90;
-p.SigmaA   = 0.009;
-p.Sigmaz   = 0.05;
-p.NA       = 7;
-p.Nz       = 7;
-p.Mina      = 1e-10;
-p.Maxa      = 200;
-p.Na       = 100;
-p.Curve    = 7;
+p.Sigmaz    = 0.05;
+p.Nz        = 7;
+p.Mina      = 1e-20;
+p.Maxa      = 300;
+p.Na        = 100;
+p.Curve     = 7;
 
 % unpack params 
-pbeta=p.Beta;palpha=p.Alpha;pdelta=p.Delta;ptheta=p.Theta;pfrisch=p.Frisch;prisk=p.RiskAversion;peta=p.Eta;pmu=p.Mu;
+pbeta=p.Beta;palpha=p.Alpha;pdelta=p.Delta;pfrisch=p.Frisch;peta=p.Eta;
 
-%% Grids and Random Processes 
+%% GRIDS AND RANDOM PROCESSES 
 % asset grid 
 x = linspace(0,0.5,p.Na);
 y = x.^p.Curve / max(x.^p.Curve);
@@ -40,11 +35,11 @@ vGrida = p.Mina + (p.Maxa - p.Mina).*y;
 [vGridz, mPz] = fnTauchen(p.Rhoz,p.Sigmaz,0.0,p.Nz);
 vGridz = exp(vGridz);
 
-% aggregate productivity grid
-[vGridA, mPA] = fnTauchen(p.RhoA,p.SigmaA,0.0,p.NA);
-vGridA = exp(vGridA);
+%% SRCE SETUP 
+% auxillary objects 
+mgrida = repmat(vGrida', 1, p.Nz); 
+mgridz = repmat(vGridz', p.Na, 1);
 
-%% SRCE
 % equilibrium objects 
 mPolc           = repmat(0.01.*vGrida', 1, p.Nz);
 K_new           = 0;
@@ -56,24 +51,21 @@ A               = 1.0;
 
 %  initial guess
 K           = 11;
-L           = 0.28;
-mPolaprime  = ones(size(mPolc)); 
+L           = 0.33;
+mPolaprime  = zeros(size(mPolc)); 
 mPoln       = ones(size(mPolc)).*L;
 mLambda     = zeros(size(mPolc));
 mCurrDist   = ones(p.Na,p.Nz)/(p.Na*p.Nz);
 
-% auxillary objects 
-mgrida = repmat(vGrida', 1, p.Nz); 
-mgridz = repmat(vGridz', p.Na, 1);
-
 % loop parameters 
-tolGE = 1e-8;
-tolDist = 1e-10;
-wtOld1 = 0.8000;
-wtOld2 = 0.8000;
-wtOld3 = 0.8000;
-wtOld4 = 0.8000;
-wtOld5 = 0.8000;
+tol_ge = 1e-8;
+tol_pfi = 1e-8;
+tol_dist = 1e-8;
+wtOld1 = 0.99500;
+wtOld2 = 0.99500;
+wtOld3 = 0.90000;
+wtOld4 = 0.90000;
+wtOld5 = 0.90000;
 
 %=========================
 % GE LOOP
@@ -81,9 +73,10 @@ wtOld5 = 0.8000;
 
 iter1 = 1;
 err1 = 10;
-dispiter = 25;
+idisp_outer = 5;
+idisp_inner = 2500;
 tic;
-while err1 > tolGE 
+while err1 > tol_ge 
 
     %=========================
     % UPDATE PRICES
@@ -94,65 +87,97 @@ while err1 > tolGE
     mmu = r+pdelta;
 
     %=========================
-    % UPDATE BELIEFS 
-    %=========================
+    % INNER LOOP - PFI 
+    %%=========================
 
-    mExp = 0;
-    for izprime = 1:p.Nz 
+    iter2 = 1;
+    err2 = 10;
+    timer_temp = toc;
+    while err2 > tol_pfi 
+
+        %=========================
+        % UPDATE BELIEFS 
+        %=========================
+    
+        mExp = 0;
+        for izprime = 1:p.Nz 
+            
+            % future realised state 
+            rprime = r;
+            wprime = w;
+            zprime = vGridz(izprime);
+            
+            % interpolate policy rules  
+            aprimeprime = interp1(vGrida', squeeze(mPolaprime(:,izprime)), mPolaprime, 'linear', 'extrap');
+            nprime = interp1(vGrida', squeeze(mPoln(:,izprime)), mPolaprime, 'linear', 'extrap');
+            
+            % cumutitively compute expectation term 
+            cprime = wprime.*zprime.*nprime + (1+rprime).*mPolaprime - aprimeprime;
+            cprime(cprime < 1e-10) = 1e-10;
+            muprime = 1./cprime;
+            mExp = mExp + repmat(mPz(:,izprime)', p.Na, 1).*(1+rprime).*muprime;
+        end
+    
+        %==========================
+        % OPTIMAL POLICY GIVEN BELIEFS
+        %==========================
         
-        % future realised state 
-        rprime = r;
-        wprime = w;
-        zprime = vGridz(izprime);
+        % intratemporal choice variables 
+        mExp = pbeta*mExp;
+        c = 1./(mExp+mLambda);
+        c(c < 1e-10) = 1e-10;
+        mPoln_new = ((w*mgridz)./(peta*c)).^pfrisch;
+        mPoln_new(mPoln_new > 1) = 1;
+        mPoln_new(mPoln_new < 0) = 0;
         
-        % interpolate policy rules  
-        aprimeprime = interp1(vGrida', squeeze(mPolaprime(:,izprime)), mPolaprime, 'linear', 'extrap');
-        nprime = interp1(vGrida', squeeze(mPoln(:,izprime)), mPolaprime, 'linear', 'extrap');
-        cprime = wprime.*zprime.*nprime + (1+rprime).*mPolaprime - aprimeprime;
-        cprime(cprime<=0) = 1e-10;
-        muprime = 1./cprime.^prisk;
-        mExp = mExp + repmat(mPz(:,izprime)', p.Na, 1).*(1+rprime).*muprime;
+        % savings rule and lagrangian constraint 
+        mLambda_new = 1./((1+r)*mgrida + w*mgridz.*mPoln - mPolaprime) - mExp;
+        mPolaprime_new = (1+r)*mgrida + w*mgridz.*mPoln - c;
+       
+        % frictions 
+        mLambda_new(mPolaprime_new>p.Mina) = 0;
+        mPolaprime_new(mPolaprime_new<=p.Mina) = p.Mina;
+
+        % compute error 
+        err2 = abs(sum(mPolaprime_new.*mCurrDist, 'all') - sum(mPolaprime.*mCurrDist, 'all'));
+        %err2 = max(abs(mPolaprime_new-mPolaprime), [], "all");
+        err_n = max(abs(mPoln_new-mPoln), [], "all");
+        err_lambda = max(abs(mLambda_new-mLambda), [], "all");
+
+        % smooth updating 
+        mPolaprime  = wtOld3.*mPolaprime    + (1-wtOld3).*mPolaprime_new;
+        mPoln       = wtOld4.*mPoln         + (1-wtOld4).*mPoln_new;
+        mLambda     = wtOld5.*mLambda       + (1-wtOld5).*mLambda_new;
+        mPolc = c;
+
+        % track progress
+        % if mod(iter2, idisp_inner) == 0
+        %     fprintf(' \n')
+        %     fprintf('PFI LOOP \n')
+        %     fprintf('iteration %d   error: %.15f \n', iter2, err2)
+        %     fprintf('err_n: %.15f   err_lambda: %.15f \n', err_n, err_lambda)
+        %     fprintf(' \n')
+        % end
+        iter2 = iter2+1;
     end
-
-    %==========================
-    % OPTIMAL POLICY GIVEN BELIEFS
-    %==========================
-
-    mExp = pbeta*mExp;
-    c = (1./(mExp+mLambda)).^(1/prisk);
-    c(c<=0) = 1e-10;
-    n = ((w*mgridz)./(peta*c.^prisk)).^pfrisch;
-    n(n>=1) = 1;
-    n(n<=0) = 0;
-
-    %==========================
-    % UPDATE POLICY RULES
-    %==========================
-
-    mLambda_new = 1./((1+r)*mgrida + w*mgridz.*n - mPolaprime).^prisk - mExp;
-    mPolaprime_new = (1+r)*mgrida + w*mgridz.*n - c;
-    mPoln_new = n;
-    mPolc = c;
-
-    % frictions 
-    mLambda_new(mPolaprime_new>p.Mina) = 0;
-    mPolaprime_new(mPolaprime_new<=p.Mina) = p.Mina;
+    timer1 = toc-timer_temp;
 
     %==========================
     % COMPUTE STATIONARY DISTRIBUTION
     %==========================
 
     % non-stochastic iterative histogram method
-    iter2 = 1;
-    err2 = 10;
-    while err2 > tolDist
+    iter3 = 1;
+    err3 = 10;
+    timer_temp = toc;
+    while err3 > tol_dist
 
         mNewDist = zeros(size(mCurrDist));
         for iz = 1:p.Nz 
             for ia = 1:p.Na
                 
                 % for state (ia,iz) interpolate optimal savings on asset grid
-                aprime = mPolaprime_new(ia,iz);
+                aprime = mPolaprime(ia,iz);
                 nLow = sum(vGrida < aprime);
                 nLow(nLow<=1) = 1;
                 nLow(nLow>=p.Na) = p.Na - 1;
@@ -176,10 +201,11 @@ while err1 > tolGE
         end
         
         % compute error and update distribution 
-        err2 = max(abs(mNewDist-mCurrDist),[],'all');
+        err3 = max(abs(mNewDist-mCurrDist),[],'all');
         mCurrDist = mNewDist;
-        iter2 = iter2+1;
+        iter3 = iter3+1;
     end
+    timer2 = toc-timer_temp;
     
     %==========================
     % COMPUTE AGGREGATES
@@ -188,52 +214,59 @@ while err1 > tolGE
     % market clearing 
     margdist            = sum(mCurrDist,2);
     K_new               = vGrida * margdist;
-    L_new               = sum(mgridz.*mPoln_new.*mCurrDist, 'all');
+    L_new               = sum(mgridz.*mPoln.*mCurrDist, 'all');
     avgmLambda          = sum(mLambda.*mCurrDist, 'all'); 
-    avgmLambda_new      = sum(mLambda_new.*mCurrDist, 'all');
     avgmPolaprime       = sum(mPolaprime.*mCurrDist, 'all');
-    avgmPolaprime_new   = sum(mPolaprime_new.*mCurrDist, 'all');
     avgmPoln            = sum(mPoln.*mCurrDist, 'all');
-    avgmPoln_new        = sum(mPoln_new.*mCurrDist, 'all');
 
     %==========================
     % UPDATING
     %==========================
     
     % error 
-    err1 = max(abs([...
-        K_new               - K;...
-        L_new               - L;...
-        avgmLambda_new      - avgmLambda;...
-        avgmPolaprime_new   - avgmPolaprime;...
-        avgmPoln_new        - avgmPoln])); 
+    err1 = mean(abs([...
+        K_new - K;...
+        L_new - L]),...
+        'all'); 
 
     % smooth updating 
-    K           = wtOld1*K              + (1-wtOld1)*K_new;
-    L           = wtOld2*L              + (1-wtOld2)*L_new;
-    mPolaprime  = wtOld3*mPolaprime     + (1-wtOld3)*mPolaprime_new;
-    mPoln       = wtOld4*mPoln          + (1-wtOld4)*mPoln_new;
-    mLambda     = wtOld5*mLambda        + (1-wtOld5)*mLambda_new;
-
+    K = wtOld1*K + (1-wtOld1)*K_new;
+    L = wtOld2*L + (1-wtOld2)*L_new;
+   
     %==========================
     % PROGRESS REPORTING
     %==========================
 
-    timer = toc;
-    if mod(iter1, dispiter) == 0
+    timer3 = toc;
+    if mod(iter1, idisp_outer) == 0 || iter1 == 1
         fprintf('-----------------------------------------------------------------\n');
-        fprintf('market clearing results: iteration %d in %.2fs\n', iter1, timer);
-        fprintf('error: %.12f \n', err1);
-        fprintf('K: %.6f    L: %.6f     r: %.6f    w: %.6f\n', K, L, r, w);
-        fprintf('min n: %.3f    max n: %.3f   min c: %.3f    max c: %.3f\n',...
-            min(min(mPoln)), max(max(mPoln)), min(min(mPolc)), max(max(mPolc)));
-        fprintf('error lambda: %.8f    min lambda: %.3f    max lambda: %.3f\n',...
-            abs(avgmLambda_new-avgmLambda), min(min(mLambda)), max(max(mLambda)));
-        fprintf('Dist Converged in %d iterations\n', iter2);
-        fprintf('\n');
-        fprintf('err K: %.8f    err L: %.8f \n err aprime: %.8f    err n: %.8f\n',abs(K_new-K), abs(L_new-L),...
-            max(abs(avgmPolaprime_new-avgmPolaprime)), max(abs(avgmPoln_new-avgmPoln)))
+        fprintf('market clearing results: \n') 
+        fprintf('iteration %d in %.2fs    error: %.15f \n', iter1, timer3, err1);
+        fprintf('K: %.12f \n', K)
+        fprintf('L: %.12f \n', L)
+        fprintf('r: %.12f \n', r)
+        fprintf('w: %.12f \n', w)
+        fprintf('min n: %.4f    max n: %.4f   min c: %.4f    max c: %.4f\n', min(min(mPoln)), max(max(mPoln)), min(min(mPolc)), max(max(mPolc)))
+        fprintf('min_lambda: %.6f    max_lambda: %.6f \n', min(min(mLambda)), max(max(mLambda)))
+        fprintf('Dist Converged in %d iterations in %.2fs \n', iter3, timer2)
+        fprintf('PFI converged in %d iterations in %.2fs \n', iter2, timer1)
     end
+    
+    
+    % if iter1 >= 500
+    %     % wtOld1 = 0.99900;
+    %     % wtOld2 = 0.99900;
+    %     wtOld3 = 0.99500;
+    %     wtOld4 = 0.99500;
+    %     wtOld5 = 0.99500;
+    % end
+    % elseif iter1 >= 5000 
+    %     wtOld1 = 0.99950;
+    %     wtOld2 = 0.99950;
+    %     wtOld3 = 0.99500;
+    %     wtOld4 = 0.99500;
+    %     wtOld5 = 0.99500;
+    % end
     iter1 = iter1 + 1;
 end
 
