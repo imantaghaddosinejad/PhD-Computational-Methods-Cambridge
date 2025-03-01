@@ -17,7 +17,7 @@ p.Eta       = 7.60;
 p.Rhoz      = 0.90;
 p.Sigmaz    = 0.05;
 p.Nz        = 7;
-p.Mina      = 1e-20;
+p.Mina      = 1;
 p.Maxa      = 300;
 p.Na        = 100;
 p.Curve     = 7;
@@ -67,11 +67,11 @@ tol_dist = 1e-8;
 % initial policy functions, convergence occurs in an osccilatory manner
 % to avoid osscilation (computational accuracy isssue) smooting parameter
 % is updated dynamically based on a weight schedule 
-WtOld1_schedule = [0.990000, 0.999900, 0.999900, 0.999900, 0.999900, 0.999990, 0.999995];
-WtOld2_schedule = [0.990000, 0.999900, 0.999900, 0.999900, 0.999900, 0.999990, 0.999995];
-WtOld3_schedule = [0.900000, 0.900000, 0.990000, 0.999000, 0.999900, 0.999990, 0.999995];
-WtOld4_schedule = [0.900000, 0.900000, 0.990000, 0.999000, 0.999900, 0.999990, 0.999995];
-WtOld5_schedule = [0.900000, 0.900000, 0.990000, 0.999000, 0.999900, 0.999990, 0.999995];
+WtOld1_schedule = [0.990000, 0.999900, 0.999900, 0.999990, 0.999990, 0.999999, 0.999999];
+WtOld2_schedule = [0.990000, 0.999900, 0.999900, 0.999990, 0.999990, 0.999999, 0.999999];
+WtOld3_schedule = [0.900000, 0.900000, 0.990000, 0.990000, 0.999000, 0.999000, 0.999900];
+WtOld4_schedule = [0.900000, 0.900000, 0.990000, 0.990000, 0.999000, 0.999000, 0.999900];
+WtOld5_schedule = [0.900000, 0.900000, 0.990000, 0.990000, 0.999000, 0.999000, 0.999900];
 
 %=========================
 % GE LOOP
@@ -88,7 +88,7 @@ iwt = 1;
 % initiate loop
 iter1 = 1;
 err1 = 10;
-idisp_outer = 50;
+idisp_outer = 100;
 %idisp_inner = 2500;
 merror = {};
 error_window = 500;
@@ -272,7 +272,7 @@ while err1 > tol_ge
     % dynamically updating weighting parameter for smoother convergence 
     merror{end+1} = err1;
     if mod(iter1, 1000) == 0 && iter1 >= 2000 && iwt<3  
-        error_array = cell2mat(merror(endpoint-error_window:endpoint));
+        error_array = cell2mat(merror(end-error_window:end));
         error_array = diff(error_array);
         pct_pos = sum(error_array>0)/(error_window);
         if pct_pos>0.4000
@@ -285,29 +285,18 @@ while err1 > tol_ge
             WtOld5 = WtOld5_schedule(iwt);
         end
     elseif mod(iter1, 1000)==0 && iwt>=3
-        error_array = cell2mat(merror(endpoint-error_window:endpoint));
+        error_array = cell2mat(merror(end-error_window:end));
         error_array = diff(error_array);
         pct_pos = sum(error_array>0)/(error_window);
-        fprintf('Updating Weights! pct_pos=%.4f   New iwt=%d \n', pct_pos, iwt)
+        fprintf('pct_pos=%.4f   New iwt=%d \n', pct_pos, iwt)
     end
-    % elseif mod(iter1, 4000)==0 && iwt>=4
-    %     error_array = cell2mat(merror(endpoint-error_window:endpoint));
-    %     error_array = diff(error_array);
-    %     pct_pos = sum(error_array>0)/(error_window);
-    %     if pct_pos>0.4000
-    %         iwt=iwt+1;
-    %         fprintf('Updating Weights! pct_pos=%.4f    iwt=%d \n', pct_pos, iwt)
-    %         WtOld1 = WtOld1_schedule(iwt);
-    %         WtOld2 = WtOld2_schedule(iwt);
-    %         WtOld3 = WtOld3_schedule(iwt);
-    %         WtOld4 = WtOld4_schedule(iwt);
-    %         WtOld5 = WtOld5_schedule(iwt);
-    %     end
-    
-    % plot iteration errors recent history 
-    if mod(iter1, 1000) == 0 
+
+    if mod(iter1, 1000) == 0 && iter1 < 5000
         merror_array = cell2mat(merror);
-        plot(merror_array(end-999:end)); grid on; ylabel('GE Error'); xlabel('Recent 1000 iterations'); drawnow; 
+        plot(merror_array(end-999:end)); grid on; ylabel('GE Error'); xlabel('Last 1000 iterations'); drawnow; 
+    elseif mod(iter1, 1000) == 0 && iter1 >= 5000
+        merror_array = cell2mat(merror);
+        plot(merror_array(end-2999:end)); grid on; ylabel('GE Error'); xlabel('Last 3000 iterations'); drawnow; 
     end
     iter1 = iter1 + 1;
 end
@@ -322,10 +311,6 @@ results1.K = K;results1.L=L;results1.w=w;results1.r=r;
 results1.err1=err1;results1.iter1=iter1;results1.timer=timer3;
 results1.merror=merror;results1.iwt=iwt;
 results1.mPolapirime=mPolaprime;results1.mPoln=mPoln;results1.mPolc=mPolc;results1.mLambda=mLambda;
-
-err_array = cell2mat(merror);
-plot(err_array); grid on;xlim([1200 21250]); 
-ylim([-1e-5, 2.6e-4]);yline(1e-8,'r-')
 
 save(".\results1.mat", 'results1')
 
@@ -350,3 +335,10 @@ plot(vGrida, mPolc); grid on;
 
 figure;
 plot(vGrida, mV); grid on;
+
+figure;
+plot(vGrida, sum(mCurrDist,2)); grid on;
+
+err_array = cell2mat(merror);
+plot(err_array); grid on;xlim([500 20000]); 
+ylim([-1e-5, 2.6e-4]);yline(1e-8,'r-')
