@@ -61,20 +61,37 @@ mCurrDist   = ones(p.Na,p.Nz)/(p.Na*p.Nz);
 tol_ge = 1e-8;
 tol_pfi = 1e-8;
 tol_dist = 1e-8;
-wtOld1 = 0.99500;
-wtOld2 = 0.99500;
-wtOld3 = 0.90000;
-wtOld4 = 0.90000;
-wtOld5 = 0.90000;
+
+% dynamic smoothing 
+% given the non-linearity in the optimality equations and guessing two
+% initial policy functions, convergence occurs in an osccilatory manner
+% to avoid osscilation (computational accuracy isssue) smooting parameter
+% is updated dynamically based on a weight schedule 
+WtOld1_schedule = [0.990000, 0.999900, 0.999900, 0.999900, 0.999900, 0.999990, 0.999995];
+WtOld2_schedule = [0.990000, 0.999900, 0.999900, 0.999900, 0.999900, 0.999990, 0.999995];
+WtOld3_schedule = [0.900000, 0.900000, 0.990000, 0.999000, 0.999900, 0.999990, 0.999995];
+WtOld4_schedule = [0.900000, 0.900000, 0.990000, 0.999000, 0.999900, 0.999990, 0.999995];
+WtOld5_schedule = [0.900000, 0.900000, 0.990000, 0.999000, 0.999900, 0.999990, 0.999995];
 
 %=========================
 % GE LOOP
 %=========================
 
+% assign weights 
+WtOld1 = WtOld1_schedule(1);
+WtOld2 = WtOld2_schedule(1);
+WtOld3 = WtOld3_schedule(1);
+WtOld4 = WtOld4_schedule(1);
+WtOld5 = WtOld5_schedule(1);
+iwt = 1;
+
+% initiate loop
 iter1 = 1;
 err1 = 10;
-idisp_outer = 5;
-idisp_inner = 2500;
+idisp_outer = 50;
+%idisp_inner = 2500;
+merror = {};
+error_window = 500;
 tic;
 while err1 > tol_ge 
 
@@ -145,9 +162,9 @@ while err1 > tol_ge
         err_lambda = max(abs(mLambda_new-mLambda), [], "all");
 
         % smooth updating 
-        mPolaprime  = wtOld3.*mPolaprime    + (1-wtOld3).*mPolaprime_new;
-        mPoln       = wtOld4.*mPoln         + (1-wtOld4).*mPoln_new;
-        mLambda     = wtOld5.*mLambda       + (1-wtOld5).*mLambda_new;
+        mPolaprime  = WtOld3.*mPolaprime    + (1-WtOld3).*mPolaprime_new;
+        mPoln       = WtOld4.*mPoln         + (1-WtOld4).*mPoln_new;
+        mLambda     = WtOld5.*mLambda       + (1-WtOld5).*mLambda_new;
         mPolc = c;
 
         % track progress
@@ -230,8 +247,8 @@ while err1 > tol_ge
         'all'); 
 
     % smooth updating 
-    K = wtOld1*K + (1-wtOld1)*K_new;
-    L = wtOld2*L + (1-wtOld2)*L_new;
+    K = WtOld1*K + (1-WtOld1)*K_new;
+    L = WtOld2*L + (1-WtOld2)*L_new;
    
     %==========================
     % PROGRESS REPORTING
@@ -249,25 +266,87 @@ while err1 > tol_ge
         fprintf('min n: %.4f    max n: %.4f   min c: %.4f    max c: %.4f\n', min(min(mPoln)), max(max(mPoln)), min(min(mPolc)), max(max(mPolc)))
         fprintf('min_lambda: %.6f    max_lambda: %.6f \n', min(min(mLambda)), max(max(mLambda)))
         fprintf('Dist Converged in %d iterations in %.2fs \n', iter3, timer2)
-        fprintf('PFI converged in %d iterations in %.2fs \n', iter2, timer1)
+        fprintf('PFI converged in %d iterations in %.2fs    iwt=%d \n', iter2, timer1, iwt)
     end
     
+    % dynamically updating weighting parameter for smoother convergence 
+    merror{end+1} = err1;
+    if mod(iter1, 1000) == 0 && iter1 >= 2000 && iwt<3  
+        error_array = cell2mat(merror(endpoint-error_window:endpoint));
+        error_array = diff(error_array);
+        pct_pos = sum(error_array>0)/(error_window);
+        if pct_pos>0.4000
+            iwt=iwt+1;
+            fprintf('Updating Weights! pct_pos=%.4f   New iwt=%d \n', pct_pos, iwt)
+            WtOld1 = WtOld1_schedule(iwt);
+            WtOld2 = WtOld2_schedule(iwt);
+            WtOld3 = WtOld3_schedule(iwt);
+            WtOld4 = WtOld4_schedule(iwt);
+            WtOld5 = WtOld5_schedule(iwt);
+        end
+    elseif mod(iter1, 1000)==0 && iwt>=3
+        error_array = cell2mat(merror(endpoint-error_window:endpoint));
+        error_array = diff(error_array);
+        pct_pos = sum(error_array>0)/(error_window);
+        fprintf('Updating Weights! pct_pos=%.4f   New iwt=%d \n', pct_pos, iwt)
+    end
+    % elseif mod(iter1, 4000)==0 && iwt>=4
+    %     error_array = cell2mat(merror(endpoint-error_window:endpoint));
+    %     error_array = diff(error_array);
+    %     pct_pos = sum(error_array>0)/(error_window);
+    %     if pct_pos>0.4000
+    %         iwt=iwt+1;
+    %         fprintf('Updating Weights! pct_pos=%.4f    iwt=%d \n', pct_pos, iwt)
+    %         WtOld1 = WtOld1_schedule(iwt);
+    %         WtOld2 = WtOld2_schedule(iwt);
+    %         WtOld3 = WtOld3_schedule(iwt);
+    %         WtOld4 = WtOld4_schedule(iwt);
+    %         WtOld5 = WtOld5_schedule(iwt);
+    %     end
     
-    % if iter1 >= 500
-    %     % wtOld1 = 0.99900;
-    %     % wtOld2 = 0.99900;
-    %     wtOld3 = 0.99500;
-    %     wtOld4 = 0.99500;
-    %     wtOld5 = 0.99500;
-    % end
-    % elseif iter1 >= 5000 
-    %     wtOld1 = 0.99950;
-    %     wtOld2 = 0.99950;
-    %     wtOld3 = 0.99500;
-    %     wtOld4 = 0.99500;
-    %     wtOld5 = 0.99500;
-    % end
+    % plot iteration errors recent history 
+    if mod(iter1, 1000) == 0 
+        merror_array = cell2mat(merror);
+        plot(merror_array(end-999:end)); grid on; ylabel('GE Error'); xlabel('Recent 1000 iterations'); drawnow; 
+    end
     iter1 = iter1 + 1;
 end
 
 
+%% 
+
+results1 = struct();
+results1.wt_schedule1 = WtOld1_schedule;
+results1.wt_schedule2 = WtOld3_schedule;
+results1.K = K;results1.L=L;results1.w=w;results1.r=r;
+results1.err1=err1;results1.iter1=iter1;results1.timer=timer3;
+results1.merror=merror;results1.iwt=iwt;
+results1.mPolapirime=mPolaprime;results1.mPoln=mPoln;results1.mPolc=mPolc;results1.mLambda=mLambda;
+
+err_array = cell2mat(merror);
+plot(err_array); grid on;xlim([1200 21250]); 
+ylim([-1e-5, 2.6e-4]);yline(1e-8,'r-')
+
+save(".\results1.mat", 'results1')
+
+%%
+
+mU = log(mPolc) - (peta/(1+1/pfrisch)).*mPoln.^(1+1/pfrisch);
+mV = zeros(size(mU));
+mVnew = 0;
+err_vfi = 10;
+iter_vfi = 1;
+while err_vfi > 1e-10
+    mVnew = mU + pbeta.*(mV*mPz');
+    err_vfi = max(abs(mVnew-mV),[],"all");
+    mV=mVnew;
+end
+
+figure;
+plot(vGrida, mCurrDist);grid on;
+
+figure;
+plot(vGrida, mPolc); grid on;
+
+figure;
+plot(vGrida, mV); grid on;
